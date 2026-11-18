@@ -1,0 +1,291 @@
+// ==========================================
+// CONFIGURATION
+// ==========================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ==========================================
+// 1. USERS & PROFILES
+// ==========================================
+
+model User {
+  id         Int      @id @default(autoincrement())
+  supabaseId String   @unique @map("supabase_id")
+  email      String   @unique
+  role       Role     @default(CUSTOMER)
+  isActive   Boolean  @default(true) @map("is_active")
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  profile            Profile?
+  wallet             Wallet?
+  orders             Order[]
+  deposits           DepositRequest[]
+  transactions       WalletTransaction[]
+  accessGrants       AccessGrant[]
+  assistanceRequests PaymentAssistanceRequest[]
+
+  @@map("users")
+}
+
+model Profile {
+  id        Int     @id @default(autoincrement())
+  userId    Int     @unique @map("user_id")
+  username  String?
+  avatarUrl String? @map("avatar_url")
+  bio       String?
+
+  user      User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+// ==========================================
+// 2. WALLET & TRANSACTIONS
+// ==========================================
+
+model Wallet {
+  id        Int      @id @default(autoincrement())
+  userId    Int      @unique @map("user_id")
+  currency  Currency @default(USD)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user         User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  transactions WalletTransaction[]
+
+  @@map("wallets")
+}
+
+model DepositRequest {
+  id        Int           @id @default(autoincrement())
+  userId    Int           @map("user_id")
+  amount    Decimal       @db.Decimal(12, 2)
+  currency  Currency
+  method    DepositMethod
+  reference String?
+  proofUrl  String?       @map("proof_url")
+  status    DepositStatus @default(PENDING)
+
+  createdAt DateTime      @default(now()) @map("created_at")
+  updatedAt DateTime      @updatedAt @map("updated_at")
+
+  user        User               @relation(fields: [userId], references: [id])
+  transaction WalletTransaction?
+
+  @@index([userId, status])
+  @@map("deposit_requests")
+}
+
+model WalletTransaction {
+  id                  Int             @id @default(autoincrement())
+  userId              Int             @map("user_id")
+  walletId            Int             @map("wallet_id")
+  depositRequestId    Int?            @unique @map("deposit_request_id")
+  orderId             Int?            @map("order_id")
+  assistanceRequestId Int?            @map("assistance_request_id")
+
+  amount              Decimal         @db.Decimal(12, 2)
+  currency            Currency
+  type                TransactionType
+  description         String?
+
+  createdAt           DateTime        @default(now()) @map("created_at")
+
+  user              User                      @relation(fields: [userId], references: [id])
+  wallet            Wallet                    @relation(fields: [walletId], references: [id])
+  depositRequest    DepositRequest?           @relation(fields: [depositRequestId], references: [id])
+  order             Order?                    @relation(fields: [orderId], references: [id])
+  assistanceRequest PaymentAssistanceRequest? @relation(fields: [assistanceRequestId], references: [id])
+
+  @@index([userId, createdAt])
+  @@index([walletId, createdAt])
+  @@map("wallet_transactions")
+}
+
+// ==========================================
+// 3. CATALOG & ORDERS
+// ==========================================
+
+model Service {
+  id          Int             @id @default(autoincrement())
+  name        String
+  slug        String          @unique
+  description String?
+  logoUrl     String?         @map("logo_url")
+  category    ServiceCategory
+  isActive    Boolean         @default(true) @map("is_active")
+
+  createdAt   DateTime        @default(now()) @map("created_at")
+  updatedAt   DateTime        @updatedAt @map("updated_at")
+
+  plans       ServicePlan[]
+
+  @@map("services")
+}
+
+model ServicePlan {
+  id           Int      @id @default(autoincrement())
+  serviceId    Int      @map("service_id")
+
+  name         String
+  description  String?
+  price        Decimal  @db.Decimal(12, 2)
+  currency     Currency @default(USD)
+  durationDays Int?     @map("duration_days")
+  isActive     Boolean  @default(true) @map("is_active")
+
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  service      Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  orders       Order[]
+
+  @@index([serviceId])
+  @@map("service_plans")
+}
+
+model Order {
+  id        Int         @id @default(autoincrement())
+  userId    Int         @map("user_id")
+  planId    Int         @map("plan_id")
+
+  amount    Decimal     @db.Decimal(12, 2)
+  currency  Currency
+  status    OrderStatus @default(PENDING)
+
+  createdAt DateTime    @default(now()) @map("created_at")
+  updatedAt DateTime    @updatedAt @map("updated_at")
+
+  user         User                @relation(fields: [userId], references: [id])
+  plan         ServicePlan         @relation(fields: [planId], references: [id])
+  transactions WalletTransaction[]
+  accessGrant  AccessGrant?
+
+  @@index([userId, status])
+  @@map("orders")
+}
+
+model AccessGrant {
+  id           Int          @id @default(autoincrement())
+  userId       Int          @map("user_id")
+  orderId      Int          @unique @map("order_id")
+
+  accountEmail String?      @map("account_email")
+  profileName  String?      @map("profile_name")
+  instructions String?
+  status       AccessStatus @default(ACTIVE)
+
+  startsAt     DateTime     @default(now()) @map("starts_at")
+  expiresAt    DateTime?    @map("expires_at")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  user         User         @relation(fields: [userId], references: [id])
+  order        Order        @relation(fields: [orderId], references: [id])
+
+  @@index([userId, status])
+  @@map("access_grants")
+}
+
+// ==========================================
+// 4. PAYMENT ASSISTANCE
+// ==========================================
+
+model PaymentAssistanceRequest {
+  id          Int              @id @default(autoincrement())
+  userId      Int              @map("user_id")
+
+  serviceName String           @map("service_name")
+  description String
+  amount      Decimal          @db.Decimal(12, 2)
+  fee         Decimal          @default(0) @db.Decimal(12, 2)
+  currency    Currency
+  reference   String?
+  status      AssistanceStatus @default(PENDING)
+
+  createdAt   DateTime         @default(now()) @map("created_at")
+  updatedAt   DateTime         @updatedAt @map("updated_at")
+
+  user         User                @relation(fields: [userId], references: [id])
+  transactions WalletTransaction[]
+
+  @@index([userId, status])
+  @@map("payment_assistance_requests")
+}
+
+// ==========================================
+// 5. ENUMS
+// ==========================================
+
+enum Role {
+  CUSTOMER
+  ADMIN
+}
+
+enum Currency {
+  USD
+  CDF
+}
+
+enum DepositMethod {
+  MOBILE_MONEY
+  BANK_TRANSFER
+  CASH
+  OTHER
+}
+
+enum DepositStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum TransactionType {
+  CREDIT
+  DEBIT
+  REFUND
+  ADJUSTMENT
+}
+
+enum ServiceCategory {
+  STREAMING
+  MUSIC
+  GAMING
+  SOCIAL_MEDIA
+  SOFTWARE
+  PAYMENT_ASSISTANCE
+  OTHER
+}
+
+enum OrderStatus {
+  PENDING
+  PROCESSING
+  COMPLETED
+  CANCELLED
+  REFUNDED
+}
+
+enum AccessStatus {
+  ACTIVE
+  EXPIRED
+  SUSPENDED
+  REVOKED
+}
+
+enum AssistanceStatus {
+  PENDING
+  APPROVED
+  PROCESSING
+  COMPLETED
+  REJECTED
+  CANCELLED
+}
